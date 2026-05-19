@@ -35,7 +35,7 @@ export default function SettingsPage() {
           <div style={{ minWidth: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 700, color: '#1D1D1F' }}>开机启动</div>
             <div style={{ marginTop: 4, fontSize: 11, color: '#86868B', lineHeight: 1.5 }}>
-              登录 Windows 后自动启动 Dragon Timer。
+              登录 Windows 后自动启动 DN Timer。
             </div>
           </div>
         </div>

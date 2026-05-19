@@ -51,7 +51,7 @@ export default function Navbar() {
           color: '#1D1D1F',
         }}
       >
-        DRAGON TIMER
+        DN TIMER
       </span>
 
       <div style={{ display: 'flex', gap: 4 }}>
