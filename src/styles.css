@@ -1,0 +1,103 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg: #F5F5F7;
+  --fg: #1D1D1F;
+  --muted: #86868B;
+  --border: #E5E5EA;
+  --gold: #D4AF37;
+  --red: #FF3B30;
+  --green: #34C759;
+  --card: #FFFFFF;
+}
+
+* {
+  font-variant-numeric: tabular-nums;
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background: transparent;
+  color: var(--fg);
+  font-family: 'Inter', 'PingFang SC', sans-serif;
+  overflow: hidden;
+}
+
+html,
+#root {
+  background: transparent;
+}
+
+@layer components {
+  .card {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    transition: border-color 0.15s;
+  }
+  .card:hover {
+    border-color: #D2D2D7;
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    height: 32px;
+    padding: 0 12px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    white-space: nowrap;
+    border: none;
+  }
+
+  .btn-gold {
+    background: linear-gradient(135deg, var(--gold), #C5A059);
+    color: #fff;
+  }
+  .btn-gold:hover {
+    box-shadow: 0 2px 10px rgba(212,175,55,0.35);
+  }
+  .btn-gold:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  .btn-ghost {
+    background: transparent;
+    color: var(--muted);
+    border: 1px solid var(--border);
+  }
+  .btn-ghost:hover {
+    background: #F5F5F7;
+    color: var(--fg);
+  }
+  .btn-ghost:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .btn-icon {
+    width: 28px;
+    height: 28px;
+    padding: 0;
+    background: transparent;
+    color: var(--muted);
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .btn-icon:hover {
+    background: rgba(0,0,0,0.04);
+    color: var(--fg);
+  }
+}
