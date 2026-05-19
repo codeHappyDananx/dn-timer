@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::ptr::null_mut;
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Manager};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_HOME,
@@ -113,7 +113,7 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
                         if state.pressed_keys.insert(vk)
                             && state.bindings.lock().unwrap().contains_key(&hotkey_str)
                         {
-                            let _ = state.app_handle.emit("hotkey:triggered", &hotkey_str);
+                            trigger_hotkey(&state.app_handle, &hotkey_str);
                         }
                     }
                 });
@@ -162,7 +162,7 @@ unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPA
                 HOOK_STATE.with(|state| {
                     if let Some(ref state) = *state.borrow() {
                         if state.bindings.lock().unwrap().contains_key(&hotkey_str) {
-                            let _ = state.app_handle.emit("hotkey:triggered", &hotkey_str);
+                            trigger_hotkey(&state.app_handle, &hotkey_str);
                         }
                     }
                 });
@@ -203,6 +203,38 @@ fn format_hotkey(modifiers: &[String], key: &str) -> String {
         key.to_string()
     } else {
         format!("{}+{}", modifiers.join("+"), key)
+    }
+}
+
+fn trigger_hotkey(app_handle: &AppHandle, hotkey: &str) {
+    let Some(state) = app_handle.try_state::<crate::AppState>() else {
+        return;
+    };
+
+    let bound_indices = {
+        let slots = state.current_slots.lock().unwrap();
+        slots
+            .iter()
+            .enumerate()
+            .filter_map(|(idx, slot)| {
+                if slot.hotkey.as_deref() == Some(hotkey) {
+                    Some(idx)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+
+    if bound_indices.is_empty() {
+        return;
+    }
+
+    let engine = state.timer_engine.lock().unwrap();
+    if bound_indices.len() == 1 {
+        engine.send(crate::core::EngineCommand::ToggleSlot(bound_indices[0]));
+    } else {
+        engine.send(crate::core::EngineCommand::StartSlotsBatch(bound_indices));
     }
 }
 

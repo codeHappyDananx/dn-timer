@@ -192,7 +192,7 @@ function FullModeView({ slots }: { slots: SlotData[] }) {
 
 export default function Dashboard() {
   const navigate = useNavigate()
-  const { slots: storeSlots, setCurrentSlotDefs } = useTimerStore()
+  const { slots: storeSlots, setCurrentPresetId, setCurrentSlotDefs } = useTimerStore()
 
   useEffect(() => {
     invoke('resize_window', { width: NORMAL_WINDOW_WIDTH, height: WINDOW_HEIGHT }).catch(() => {})
@@ -217,17 +217,28 @@ export default function Dashboard() {
       const list = presets.map((p) => ({ id: p.id, name: p.name }))
       setTemplates(list)
       if (list.length > 0) {
-        setSelected(list[0].name)
-        const preset = presets.find((p) => p.id === list[0].id)
-        setCurrentSlotDefs(getPresetSlots(preset))
+        const currentPresetId = await invoke<string | null>('get_current_preset_id').catch(() => null)
         const snapshot = await invoke<TimerSnapshot>('get_timer_snapshot').catch(() => ({ slots: [] }))
         const hasRuntimeSlots = snapshot.slots.length > 0 || useTimerStore.getState().slots.length > 0
-        if (!hasRuntimeSlots) {
-          invoke('select_preset', { id: list[0].id })
+        const activeId = currentPresetId || (!hasRuntimeSlots ? list[0].id : '')
+        const preset = presets.find((p) => p.id === activeId)
+
+        if (preset) {
+          setSelected(preset.name)
+          setCurrentPresetId(preset.id)
+          setCurrentSlotDefs(getPresetSlots(preset))
+        } else {
+          setSelected('')
+          setCurrentPresetId(null)
+          setCurrentSlotDefs([])
+        }
+
+        if (!hasRuntimeSlots && activeId) {
+          invoke('select_preset', { id: activeId })
         }
       }
     })
-  }, [setCurrentSlotDefs])
+  }, [setCurrentPresetId, setCurrentSlotDefs])
 
   /* Close dropdown on outside click */
   useEffect(() => {
@@ -243,6 +254,7 @@ export default function Dashboard() {
   const handleSelectTemplate = async (t: { id: string; name: string }) => {
     await invoke('select_preset', { id: t.id })
     setSelected(t.name)
+    setCurrentPresetId(t.id)
     setDropdownOpen(false)
     const presets = await invoke<BackendPreset[]>('list_presets')
     const preset = presets.find((p) => p.id === t.id)

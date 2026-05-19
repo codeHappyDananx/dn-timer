@@ -11,7 +11,8 @@ interface Dungeon { id: string; name: string; short_name: string; max_clears: nu
 interface ClearRecord { character_id: string; dungeon_id: string; current_clears: number }
 
 const CHARACTER_COLUMN_WIDTH = 148
-const CLASS_COLUMN_WIDTH = 112
+const MIN_CLASS_COLUMN_WIDTH = 112
+const MAX_CLASS_COLUMN_WIDTH = 180
 const NOTE_COLUMN_WIDTH = 210
 const DUNGEON_COLUMN_WIDTH = 82
 const CHARACTER_PAGE_CHROME_WIDTH = 24
@@ -33,6 +34,10 @@ const weekOptions = [
 function cellColor(clears: number, max: number): { bg: string; text: string } {
   if (clears >= max) return { bg: '#F0FFF4', text: '#248A3D' }
   return { bg: '#FFF5F5', text: '#D70015' }
+}
+
+function measureTextWidth(text: string) {
+  return Array.from(text).reduce((total, char) => total + (char.charCodeAt(0) > 255 ? 14 : 7), 0)
 }
 
 function ClassIcon({ classKey, size = 24 }: { classKey?: string | null; size?: number }) {
@@ -512,14 +517,6 @@ export default function Characters() {
   useEffect(() => { load() }, [load])
 
   useEffect(() => {
-    const targetWidth = Math.max(
-      NORMAL_WINDOW_WIDTH,
-      CHARACTER_COLUMN_WIDTH + CLASS_COLUMN_WIDTH + NOTE_COLUMN_WIDTH + dungeons.length * DUNGEON_COLUMN_WIDTH + CHARACTER_PAGE_CHROME_WIDTH
-    )
-    invoke('resize_window', { width: targetWidth, height: WINDOW_HEIGHT }).catch(() => {})
-  }, [dungeons.length])
-
-  useEffect(() => {
     function handler(e: MouseEvent) {
       if (ddRef.current && !ddRef.current.contains(e.target as Node)) setDdOpen(false)
     }
@@ -652,10 +649,24 @@ export default function Characters() {
   const tableChars = selDungeon && hideNoCdChars
     ? sortedChars.filter((char) => getClears(char.id, selDungeon) > 0)
     : sortedChars
+  const classColumnWidth = useMemo(() => {
+    const maxNameWidth = sortedChars
+      .map((char) => getClassByKey(char.class_key)?.name || '选择职业')
+      .reduce((max, name) => Math.max(max, measureTextWidth(name)), 0)
+    return Math.max(MIN_CLASS_COLUMN_WIDTH, Math.min(MAX_CLASS_COLUMN_WIDTH, maxNameWidth + 54))
+  }, [sortedChars])
+
+  useEffect(() => {
+    const targetWidth = Math.max(
+      NORMAL_WINDOW_WIDTH,
+      CHARACTER_COLUMN_WIDTH + classColumnWidth + NOTE_COLUMN_WIDTH + dungeons.length * DUNGEON_COLUMN_WIDTH + CHARACTER_PAGE_CHROME_WIDTH
+    )
+    invoke('resize_window', { width: targetWidth, height: WINDOW_HEIGHT }).catch(() => {})
+  }, [classColumnWidth, dungeons.length])
 
   const visibleDungeonCount = Math.max(
     1,
-    Math.floor(((tableWidth || 340) - CHARACTER_COLUMN_WIDTH - CLASS_COLUMN_WIDTH - NOTE_COLUMN_WIDTH) / DUNGEON_COLUMN_WIDTH)
+    Math.floor(((tableWidth || 340) - CHARACTER_COLUMN_WIDTH - classColumnWidth - NOTE_COLUMN_WIDTH) / DUNGEON_COLUMN_WIDTH)
   )
   const dungeonPages = Math.max(1, Math.ceil(dungeons.length / visibleDungeonCount))
   const visibleDungeons = useMemo(() => {
@@ -782,7 +793,7 @@ export default function Characters() {
           <table style={{ width: '100%', tableLayout: 'fixed', borderCollapse: 'collapse' }}>
             <colgroup>
               <col style={{ width: CHARACTER_COLUMN_WIDTH }} />
-              <col style={{ width: CLASS_COLUMN_WIDTH }} />
+              <col style={{ width: classColumnWidth }} />
               {visibleDungeons.map((d) => (
                 <col key={d.id} style={{ width: DUNGEON_COLUMN_WIDTH }} />
               ))}
@@ -791,7 +802,7 @@ export default function Characters() {
             <thead>
               <tr style={{ height: 36 }}>
                 <th style={{ position: 'sticky', top: 0, left: 0, zIndex: 10, width: CHARACTER_COLUMN_WIDTH, padding: '0 8px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#86868B', background: '#fff', borderBottom: '2px solid #E5E5EA' }}>角色</th>
-                <th style={{ position: 'sticky', top: 0, left: CHARACTER_COLUMN_WIDTH, zIndex: 9, width: CLASS_COLUMN_WIDTH, padding: '0 8px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#86868B', background: '#fff', borderBottom: '2px solid #E5E5EA' }}>职业</th>
+                <th style={{ position: 'sticky', top: 0, left: CHARACTER_COLUMN_WIDTH, zIndex: 9, width: classColumnWidth, padding: '0 8px', textAlign: 'left', fontSize: 11, fontWeight: 600, color: '#86868B', background: '#fff', borderBottom: '2px solid #E5E5EA' }}>职业</th>
                 {visibleDungeons.map((d) => {
                   const muted = !!selDungeon && selDungeon !== d.id
                   return (
@@ -822,7 +833,7 @@ export default function Characters() {
                       </button>
                     </div>
                   </td>
-                  <td style={{ position: 'sticky', left: CHARACTER_COLUMN_WIDTH, zIndex: 4, padding: '0 6px', background: i % 2 === 0 ? '#fff' : '#FAFAFC', borderBottom: '1px solid #F0F0F2', width: CLASS_COLUMN_WIDTH }}>
+                  <td style={{ position: 'sticky', left: CHARACTER_COLUMN_WIDTH, zIndex: 4, padding: '0 6px', background: i % 2 === 0 ? '#fff' : '#FAFAFC', borderBottom: '1px solid #F0F0F2', width: classColumnWidth }}>
                     <ClassSelect value={char.class_key} onChange={(classKey) => updateCharClass(char.id, classKey)} showIcon={false} />
                   </td>
                   {visibleDungeons.map((d) => {

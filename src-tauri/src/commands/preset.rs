@@ -17,6 +17,11 @@ pub fn list_presets(state: State<'_, AppState>) -> Result<Vec<TimerPreset>, Stri
 }
 
 #[tauri::command]
+pub fn get_current_preset_id(state: State<'_, AppState>) -> Option<String> {
+    state.current_preset_id.lock().unwrap().clone()
+}
+
+#[tauri::command]
 pub fn create_preset(state: State<'_, AppState>, data: PresetRequest) -> Result<(), String> {
     let mut db = state.db.lock().unwrap();
     let mut preset = TimerPreset::new(&data.name, data.preset_type);
@@ -39,19 +44,7 @@ pub fn update_preset(
     preset.desc = data.desc;
     preset.preset_type = data.preset_type;
     preset.updated_at = chrono::Utc::now();
-    db.save_preset(&preset).map_err(|e| e.to_string())?;
-
-    let is_current = {
-        let current = state.current_preset_id.lock().unwrap();
-        current.as_ref() == Some(&id)
-    };
-
-    if is_current {
-        drop(db);
-        select_preset(state, id)?;
-    }
-
-    Ok(())
+    db.save_preset(&preset).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -221,19 +214,7 @@ fn update_slot_config_impl(
     }
 
     preset.updated_at = chrono::Utc::now();
-    db.save_preset(&preset).map_err(|e| e.to_string())?;
-
-    let is_current = {
-        let current = state.current_preset_id.lock().unwrap();
-        current.as_ref() == Some(&preset_id)
-    };
-
-    if is_current {
-        drop(db);
-        select_preset(state, preset_id)?;
-    }
-
-    Ok(())
+    db.save_preset(&preset).map_err(|e| e.to_string())
 }
 
 #[tauri::command]

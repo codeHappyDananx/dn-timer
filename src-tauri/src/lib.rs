@@ -127,6 +127,7 @@ pub fn run() {
             commands::timer::toggle_slot,
             commands::timer::trigger_hotkey,
             commands::preset::list_presets,
+            commands::preset::get_current_preset_id,
             commands::preset::create_preset,
             commands::preset::update_preset,
             commands::preset::delete_preset,

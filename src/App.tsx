@@ -98,13 +98,6 @@ function App() {
       setSlotState(slot_index, { status: "triggered", loopCount: loop_count });
     });
 
-    const unlistenHotkey = listen("hotkey:triggered", (event: any) => {
-      const hotkey = event.payload as string;
-      if (hotkey) {
-        invoke("trigger_hotkey", { hotkey });
-      }
-    });
-
     const unlistenDocked = listen("window:docked", (event: any) => {
       setDockedMode(Boolean(event.payload));
       if (event.payload) setDockPreviewMode(false);
@@ -118,7 +111,6 @@ function App() {
       unlistenTick.then((f) => f());
       unlistenWarn.then((f) => f());
       unlistenTrigger.then((f) => f());
-      unlistenHotkey.then((f) => f());
       unlistenDocked.then((f) => f());
       unlistenDockPreview.then((f) => f());
     };
