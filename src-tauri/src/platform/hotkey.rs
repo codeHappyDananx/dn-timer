@@ -2,17 +2,21 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::ptr::null_mut;
 use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Manager};
 use windows::Win32::Foundation::{HWND, LPARAM, LRESULT, WPARAM};
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1, VK_HOME,
-    VK_INSERT, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_MENU, VK_NEXT, VK_PRIOR, VK_RCONTROL,
-    VK_RIGHT, VK_RMENU, VK_RSHIFT, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
+    GetAsyncKeyState, RegisterHotKey, UnregisterHotKey, HOT_KEY_MODIFIERS, MOD_ALT, MOD_CONTROL,
+    MOD_NOREPEAT, MOD_SHIFT, VK_BACK, VK_CONTROL, VK_DELETE, VK_DOWN, VK_END, VK_ESCAPE, VK_F1,
+    VK_HOME, VK_INSERT, VK_LCONTROL, VK_LEFT, VK_LMENU, VK_LSHIFT, VK_MENU, VK_NEXT, VK_PRIOR,
+    VK_RCONTROL, VK_RIGHT, VK_RMENU, VK_RSHIFT, VK_SHIFT, VK_SPACE, VK_TAB, VK_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, SetWindowsHookExW, UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT, MSLLHOOKSTRUCT,
-    WH_KEYBOARD_LL, WH_MOUSE_LL, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_MBUTTONDOWN,
-    WM_RBUTTONDOWN, WM_SYSKEYDOWN, WM_SYSKEYUP, WM_XBUTTONDOWN,
+    CallNextHookEx, DispatchMessageW, PeekMessageW, SetWindowsHookExW, TranslateMessage,
+    UnhookWindowsHookEx, HHOOK, KBDLLHOOKSTRUCT, MSG, MSLLHOOKSTRUCT, PM_REMOVE, WH_KEYBOARD_LL,
+    WH_MOUSE_LL, WM_HOTKEY, WM_KEYDOWN, WM_KEYUP, WM_LBUTTONDOWN, WM_MBUTTONDOWN, WM_RBUTTONDOWN,
+    WM_SYSKEYDOWN, WM_SYSKEYUP, WM_XBUTTONDOWN,
 };
 
 thread_local! {
@@ -24,12 +28,14 @@ struct HookState {
     mouse_hook: HHOOK,
     app_handle: AppHandle,
     bindings: Arc<Mutex<HashMap<String, String>>>,
+    registered_keyboard_hotkeys: Arc<Mutex<HashSet<String>>>,
     pressed_keys: HashSet<i32>,
 }
 
 pub struct HotkeyManager {
     app_handle: AppHandle,
     bindings: Arc<Mutex<HashMap<String, String>>>,
+    registered_keyboard_hotkeys: Arc<Mutex<HashSet<String>>>,
 }
 
 impl HotkeyManager {
@@ -37,6 +43,7 @@ impl HotkeyManager {
         Self {
             app_handle,
             bindings: Arc::new(Mutex::new(HashMap::new())),
+            registered_keyboard_hotkeys: Arc::new(Mutex::new(HashSet::new())),
         }
     }
 
@@ -48,6 +55,7 @@ impl HotkeyManager {
     pub fn start(&self) {
         let app_handle = self.app_handle.clone();
         let bindings = Arc::clone(&self.bindings);
+        let registered_keyboard_hotkeys = Arc::clone(&self.registered_keyboard_hotkeys);
 
         std::thread::spawn(move || {
             unsafe {
@@ -61,20 +69,51 @@ impl HotkeyManager {
                         *state.borrow_mut() = Some(HookState {
                             keyboard_hook: kb_hook,
                             mouse_hook: m_hook,
-                            app_handle,
+                            app_handle: app_handle.clone(),
                             bindings,
+                            registered_keyboard_hotkeys: Arc::clone(&registered_keyboard_hotkeys),
                             pressed_keys: HashSet::new(),
                         });
                     });
 
-                    // Message loop for hooks
-                    use windows::Win32::UI::WindowsAndMessaging::{
-                        DispatchMessageW, GetMessageW, TranslateMessage, MSG,
-                    };
+                    let mut registered = RegisteredHotkeys::new(app_handle.clone());
+                    let mut last_sync = Instant::now() - Duration::from_millis(250);
                     let mut msg: MSG = std::mem::zeroed();
-                    while GetMessageW(&mut msg, HWND(null_mut()), 0, 0).into() {
-                        let _ = TranslateMessage(&msg);
-                        DispatchMessageW(&msg);
+                    loop {
+                        if last_sync.elapsed() >= Duration::from_millis(250) {
+                            let keys = HOOK_STATE.with(|state| {
+                                state
+                                    .borrow()
+                                    .as_ref()
+                                    .map(|state| {
+                                        state
+                                            .bindings
+                                            .lock()
+                                            .unwrap()
+                                            .keys()
+                                            .cloned()
+                                            .collect::<HashSet<_>>()
+                                    })
+                                    .unwrap_or_default()
+                            });
+                            registered.sync(&keys);
+                            *registered_keyboard_hotkeys.lock().unwrap() =
+                                registered.registered_keys();
+                            last_sync = Instant::now();
+                        }
+
+                        while PeekMessageW(&mut msg, HWND(null_mut()), 0, 0, PM_REMOVE).into() {
+                            if msg.message == WM_HOTKEY {
+                                if let Some(hotkey) = registered.get(msg.wParam.0 as i32) {
+                                    trigger_hotkey(&registered.app_handle, hotkey);
+                                }
+                            } else {
+                                let _ = TranslateMessage(&msg);
+                                DispatchMessageW(&msg);
+                            }
+                        }
+
+                        thread::sleep(Duration::from_millis(10));
                     }
                 }
             }
@@ -112,6 +151,11 @@ unsafe extern "system" fn keyboard_hook_proc(code: i32, wparam: WPARAM, lparam: 
                     if let Some(ref mut state) = *state.borrow_mut() {
                         if state.pressed_keys.insert(vk)
                             && state.bindings.lock().unwrap().contains_key(&hotkey_str)
+                            && !state
+                                .registered_keyboard_hotkeys
+                                .lock()
+                                .unwrap()
+                                .contains(&hotkey_str)
                         {
                             trigger_hotkey(&state.app_handle, &hotkey_str);
                         }
@@ -171,6 +215,86 @@ unsafe extern "system" fn mouse_hook_proc(code: i32, wparam: WPARAM, lparam: LPA
     }
 
     CallNextHookEx(None, code, wparam, lparam)
+}
+
+struct RegisteredHotkeys {
+    app_handle: AppHandle,
+    hotkeys_by_id: HashMap<i32, String>,
+    ids_by_hotkey: HashMap<String, i32>,
+    next_id: i32,
+}
+
+impl RegisteredHotkeys {
+    fn new(app_handle: AppHandle) -> Self {
+        Self {
+            app_handle,
+            hotkeys_by_id: HashMap::new(),
+            ids_by_hotkey: HashMap::new(),
+            next_id: 1,
+        }
+    }
+
+    fn sync(&mut self, keys: &HashSet<String>) {
+        let active_keys = self.ids_by_hotkey.keys().cloned().collect::<HashSet<_>>();
+        for key in active_keys.difference(keys) {
+            if let Some(id) = self.ids_by_hotkey.remove(key) {
+                unsafe {
+                    let _ = UnregisterHotKey(HWND(null_mut()), id);
+                }
+                self.hotkeys_by_id.remove(&id);
+            }
+        }
+
+        for key in keys {
+            if self.ids_by_hotkey.contains_key(key) {
+                continue;
+            }
+            let Some((modifiers, vk)) = parse_keyboard_hotkey(key) else {
+                continue;
+            };
+            let id = self.next_id;
+            self.next_id += 1;
+            if unsafe { RegisterHotKey(HWND(null_mut()), id, modifiers, vk) }.is_ok() {
+                self.ids_by_hotkey.insert(key.clone(), id);
+                self.hotkeys_by_id.insert(id, key.clone());
+            }
+        }
+    }
+
+    fn get(&self, id: i32) -> Option<&str> {
+        self.hotkeys_by_id.get(&id).map(String::as_str)
+    }
+
+    fn registered_keys(&self) -> HashSet<String> {
+        self.ids_by_hotkey.keys().cloned().collect()
+    }
+}
+
+impl Drop for RegisteredHotkeys {
+    fn drop(&mut self) {
+        for id in self.hotkeys_by_id.keys() {
+            unsafe {
+                let _ = UnregisterHotKey(HWND(null_mut()), *id);
+            }
+        }
+    }
+}
+
+fn parse_keyboard_hotkey(hotkey: &str) -> Option<(HOT_KEY_MODIFIERS, u32)> {
+    let mut modifiers = MOD_NOREPEAT.0;
+    let mut key = None;
+
+    for part in hotkey.split('+') {
+        match part {
+            "Ctrl" => modifiers |= MOD_CONTROL.0,
+            "Alt" => modifiers |= MOD_ALT.0,
+            "Shift" => modifiers |= MOD_SHIFT.0,
+            value => key = Some(value),
+        }
+    }
+
+    key.and_then(key_to_vk)
+        .map(|vk| (HOT_KEY_MODIFIERS(modifiers), vk as u32))
 }
 
 fn get_current_modifiers() -> Vec<String> {
@@ -235,6 +359,46 @@ fn trigger_hotkey(app_handle: &AppHandle, hotkey: &str) {
         engine.send(crate::core::EngineCommand::ToggleSlot(bound_indices[0]));
     } else {
         engine.send(crate::core::EngineCommand::StartSlotsBatch(bound_indices));
+    }
+}
+
+fn key_to_vk(key: &str) -> Option<i32> {
+    if key.len() == 1 {
+        let value = key.as_bytes()[0];
+        if value.is_ascii_uppercase() || value.is_ascii_digit() {
+            return Some(value as i32);
+        }
+    }
+
+    match key {
+        "F1" => Some(VK_F1.0 as i32),
+        "F2" => Some(VK_F1.0 as i32 + 1),
+        "F3" => Some(VK_F1.0 as i32 + 2),
+        "F4" => Some(VK_F1.0 as i32 + 3),
+        "F5" => Some(VK_F1.0 as i32 + 4),
+        "F6" => Some(VK_F1.0 as i32 + 5),
+        "F7" => Some(VK_F1.0 as i32 + 6),
+        "F8" => Some(VK_F1.0 as i32 + 7),
+        "F9" => Some(VK_F1.0 as i32 + 8),
+        "F10" => Some(VK_F1.0 as i32 + 9),
+        "F11" => Some(VK_F1.0 as i32 + 10),
+        "F12" => Some(VK_F1.0 as i32 + 11),
+        "Space" => Some(VK_SPACE.0 as i32),
+        "Enter" => Some(VK_RETURN.0 as i32),
+        "Esc" => Some(VK_ESCAPE.0 as i32),
+        "Backspace" => Some(VK_BACK.0 as i32),
+        "Tab" => Some(VK_TAB.0 as i32),
+        "Left" => Some(VK_LEFT.0 as i32),
+        "Right" => Some(VK_RIGHT.0 as i32),
+        "Up" => Some(VK_UP.0 as i32),
+        "Down" => Some(VK_DOWN.0 as i32),
+        "Insert" => Some(VK_INSERT.0 as i32),
+        "Delete" => Some(VK_DELETE.0 as i32),
+        "Home" => Some(VK_HOME.0 as i32),
+        "End" => Some(VK_END.0 as i32),
+        "PageUp" => Some(VK_PRIOR.0 as i32),
+        "PageDown" => Some(VK_NEXT.0 as i32),
+        _ => None,
     }
 }
 
